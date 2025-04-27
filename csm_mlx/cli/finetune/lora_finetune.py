@@ -171,7 +171,8 @@ def sft_finetune(
     ckpt_freq: Annotated[
         int,
         typer.Option(
-            "--ckpt_freq",
+            "--ckpt-freq",
+            "--ckpt_freq", # inconsistent name; kept for compatibility
             help="Save checkpoints every N steps",
             min=1,
         ),
@@ -206,6 +207,40 @@ def sft_finetune(
             help="Only save trainable parameters",
         ),
     ] = True,
+    val_data_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--val-data-path",
+            help="Path to JSON dataset file with text/audio pairs",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        )
+    ] = "",
+    val_batch_size: Annotated[
+        Optional[int],
+        typer.Option(
+            "--val-batch-size",
+            help="Batch size for validation",
+            min=1,
+        ),
+    ] = 4,
+    val_freq: Annotated[
+        Optional[int],
+        typer.Option(
+            "--val-freq",
+            help="Calculate validation loss every N steps, 0 to disable",
+            min=0,
+        )
+    ] = 0,
+    val_ckpt: Annotated[
+        bool,
+        typer.Option(
+            "--val-ckpt/--no-val-ckpt",
+            help="Caclulate validation loss on each saved checkpoint.",
+        ),
+    ] = False,
 ):
     """LoRA(Low-Rank Adaptation) SFT finetuning for CSM models."""
     embedding_targets = [t for t in target_modules if "embeddings" in t]
@@ -297,6 +332,9 @@ def sft_finetune(
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,
+            val_freq=val_freq,
+            val_batch_size=val_batch_size,
+            val_ckpt=val_ckpt,
         )
     )
 
@@ -309,6 +347,17 @@ def sft_finetune(
     )
     print(f"Loaded {len(dataset)} samples")
 
+    val_dataset = []
+    if val_data_path:
+        print(f"Loading validation dataset from {val_data_path}")
+        val_dataset = CSMDataset.from_json(
+            str(val_data_path),
+            n_audio_codebooks=csm_model.n_audio_codebooks,
+            max_audio_length_ms=max_audio_length_ms,
+            mask_speaker_ids=mask_speaker_ids,
+        )
+        print(f"Loaded {len(val_dataset)} samples")
+
     if len(dataset) == 0:
         print("Error: Dataset is empty. Please check the data path and format.")
         raise typer.Exit(code=1)
@@ -316,27 +365,41 @@ def sft_finetune(
         print(
             f"Warning: Dataset size ({len(dataset)}) is smaller than batch size ({batch_size}). Consider reducing batch size."
         )
+    if val_data_path and len(val_dataset) == 0:
+        print("Error: Validation dataset is empty. Please check the data path and format.")
+        raise typer.Exit(code=1)
 
     print(f"Starting LoRA training for {epochs} epochs, batch size {batch_size}")
     print(f"Optimizer: {optimizer.value}, LR: {learning_rate}, WD: {weight_decay}")
     print(f"Saving checkpoints every {ckpt_freq} steps to {output_dir}")
     print(f"Logging metrics every {log_freq} steps")
+    if val_dataset:
+        if val_freq and val_ckpt:
+            print(f"Validating every checkpoint and every {val_freq} steps")
+        elif val_freq:
+            print(f"Validating every {val_freq} steps")
+        elif val_ckpt:
+            print(f"Validating every checkpoint")
+        else:
+            print(f"Error: val_dataset is set but both {val_freq=} and {val_ckpt=}")
+            raise typer.Exit(code=1)
 
     try:
         _training_history = trainer.train(
             dataset=dataset,
             batch_size=batch_size,
             epochs=epochs,
+            val_dataset=val_dataset,
         )
         print("\nTraining complete!")
         print(f"Checkpoints and logs saved in {output_dir}")
-        final_adopter_path = output_dir / "adapters.safetensors"
-        print(f"Saving final adopter weights to {final_adopter_path}...")
+        final_adapter_path = output_dir / "adapters.safetensors"
+        print(f"Saving final adapter weights to {final_adapter_path}...")
         mx.save_safetensors(
-            str(final_adopter_path),
+            str(final_adapter_path),
             dict(tree_flatten(csm_model.trainable_parameters())),
         )
-        print("Final adopter saved.")
+        print("Final adapter saved.")
 
     except Exception as e:
         print(f"An error occurred during training: {e}")
@@ -491,7 +554,8 @@ def dpo_finetune(
     ckpt_freq: Annotated[
         int,
         typer.Option(
-            "--ckpt_freq",
+            "--ckpt-freq",
+            "--ckpt_freq", # inconsistent name; kept for compatibility
             help="Save checkpoints every N steps",
             min=1,
         ),
@@ -637,6 +701,7 @@ def dpo_finetune(
     )
     print(f"Loaded {len(dataset)} samples")
 
+
     if len(dataset) == 0:
         print("Error: Dataset is empty. Please check the data path and format.")
         raise typer.Exit(code=1)
@@ -658,13 +723,13 @@ def dpo_finetune(
         )
         print("\nTraining complete!")
         print(f"Checkpoints and logs saved in {output_dir}")
-        final_adopter_path = output_dir / "adapters.safetensors"
-        print(f"Saving final adopter weights to {final_adopter_path}...")
+        final_adapter_path = output_dir / "adapters.safetensors"
+        print(f"Saving final adapter weights to {final_adapter_path}...")
         mx.save_safetensors(
-            str(final_adopter_path),
+            str(final_adapter_path),
             dict(tree_flatten(csm_model.trainable_parameters())),
         )
-        print("Final adopter saved.")
+        print("Final adapter saved.")
 
     except Exception as e:
         print(f"An error occurred during training: {e}")
@@ -820,6 +885,7 @@ def kto_finetune(
         int,
         typer.Option(
             "--ckpt_freq",
+            "--ckpt_freq", # inconsistent name; kept for compatibility
             help="Save checkpoints every N steps",
             min=1,
         ),
@@ -1010,13 +1076,13 @@ def kto_finetune(
         )
         print("\nTraining complete!")
         print(f"Checkpoints and logs saved in {output_dir}")
-        final_adopter_path = output_dir / "adapters.safetensors"
-        print(f"Saving final adopter weights to {final_adopter_path}...")
+        final_adapter_path = output_dir / "adapters.safetensors"
+        print(f"Saving final adapter weights to {final_adapter_path}...")
         mx.save_safetensors(
-            str(final_adopter_path),
+            str(final_adapter_path),
             dict(tree_flatten(csm_model.trainable_parameters())),
         )
-        print("Final adopter saved.")
+        print("Final adapter saved.")
 
     except Exception as e:
         print(f"An error occurred during training: {e}")
