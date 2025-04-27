@@ -522,16 +522,10 @@ class CSMTrainer:
                     if self.args.val_ckpt and val_dataset is not None:
                         val_loss = self.evaluate(val_dataset)
                         print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
-
-                if (
+                elif (
                     self.args.val_freq > 0
-                    and val_dataset is not None
                     and self.state.step % self.args.val_freq == 0
-                    and not (   # avoid running twice if val_ckpt
-                        self.args.val_ckpt
-                        and self.args.ckpt_freq > 0
-                        and self.state.step % self.args.ckpt_freq == 0
-                    )
+                    and val_dataset is not None
                 ):
                     val_loss = self.evaluate(val_dataset)
                     print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
@@ -548,7 +542,14 @@ class CSMTrainer:
             print(f"Completed Epoch {epoch + 1}. Saving checkpoint.")
 
             self.checkpointer.save()
-            if self.args.val_ckpt and val_dataset is not None:
+            if (
+                self.args.val_ckpt
+                and val_dataset is not None
+                and (
+                    self.args.val_freq == 0 or
+                    self.state.step % self.args.val_freq != 0
+                )
+            ):
                 val_loss = self.evaluate(val_dataset)
                 print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
 
