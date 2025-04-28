@@ -217,7 +217,7 @@ def sft_finetune(
             dir_okay=False,
             readable=True,
         )
-    ] = "",
+    ] = None,
     val_batch_size: Annotated[
         Optional[int],
         typer.Option(
@@ -332,8 +332,8 @@ def sft_finetune(
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,
-            val_freq=val_freq,
-            val_batch_size=val_batch_size,
+            val_freq=val_freq or 0,
+            val_batch_size=val_batch_size or 0,
             val_ckpt=val_ckpt,
         )
     )
@@ -347,7 +347,15 @@ def sft_finetune(
     )
     print(f"Loaded {len(dataset)} samples")
 
-    val_dataset = []
+    if len(dataset) == 0:
+        print("Error: Dataset is empty. Please check the data path and format.")
+        raise typer.Exit(code=1)
+    if len(dataset) < batch_size:
+        print(
+            f"Warning: Dataset size ({len(dataset)}) is smaller than batch size ({batch_size}). Consider reducing batch size."
+        )
+
+    val_dataset = None
     if val_data_path:
         print(f"Loading validation dataset from {val_data_path}")
         val_dataset = CSMDataset.from_json(
@@ -356,18 +364,11 @@ def sft_finetune(
             max_audio_length_ms=max_audio_length_ms,
             mask_speaker_ids=mask_speaker_ids,
         )
-        print(f"Loaded {len(val_dataset)} samples")
-
-    if len(dataset) == 0:
-        print("Error: Dataset is empty. Please check the data path and format.")
-        raise typer.Exit(code=1)
-    if len(dataset) < batch_size:
-        print(
-            f"Warning: Dataset size ({len(dataset)}) is smaller than batch size ({batch_size}). Consider reducing batch size."
-        )
-    if val_data_path and len(val_dataset) == 0:
-        print("Error: Validation dataset is empty. Please check the data path and format.")
-        raise typer.Exit(code=1)
+        if len(val_dataset):
+            print(f"Loaded {len(val_dataset)} samples")
+        else:
+            print("Error: Validation dataset is empty. Please check the data path and format.")
+            raise typer.Exit(code=1)
 
     print(f"Starting LoRA training for {epochs} epochs, batch size {batch_size}")
     print(f"Optimizer: {optimizer.value}, LR: {learning_rate}, WD: {weight_decay}")

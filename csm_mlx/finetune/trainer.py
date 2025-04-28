@@ -354,7 +354,6 @@ class CSMTrainer:
                 },
                 per_sample=False,
             )
-            # mx.eval(loss) -- not sure if needed here
             batch_loss = loss.item()
             batch_size_actual = len(batch_idx_list)
             total_val_loss += batch_loss * batch_size_actual
@@ -366,7 +365,7 @@ class CSMTrainer:
             if total_samples == 0:
                 return float('inf')
             avg_val_loss = total_val_loss / total_samples
-            return avg_val_loss
+            return float(avg_val_loss)
 
 
     def train_step(self, batch: Dict[str, mx.array]) -> float:
@@ -431,8 +430,12 @@ class CSMTrainer:
         return float(loss)
 
     def train(
-        self, dataset: CSMDataset, batch_size: int, epochs: int,
-        val_dataset: CSMDataset | None = None, shuffle: bool = True
+        self,
+        dataset: CSMDataset,
+        batch_size: int,
+        epochs: int,
+        shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ) -> History:
         """Train the model on the dataset."""
         num_samples = len(dataset)
@@ -670,12 +673,13 @@ class DPOTrainer(CSMTrainer):
         batch_size: int,
         epochs: int,
         shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ):
         if not isinstance(dataset, CSMPairwiseDataset):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
-        return super().train(dataset, batch_size, epochs, shuffle)
+        return super().train(dataset, batch_size, epochs, shuffle, val_dataset=val_dataset)
 
 
 class KTOTrainer(CSMTrainer):
@@ -855,9 +859,10 @@ class KTOTrainer(CSMTrainer):
         batch_size: int,
         epochs: int,
         shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ):
         if not isinstance(dataset, CSMPointwiseDataset):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
-        return super().train(dataset, batch_size, epochs, shuffle)
+        return super().train(dataset, batch_size, epochs, shuffle, val_dataset)
