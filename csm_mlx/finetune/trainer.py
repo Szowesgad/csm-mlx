@@ -679,6 +679,10 @@ class DPOTrainer(CSMTrainer):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
+
+        if val_dataset is not None:
+            raise ValueError("val_dataset must be None for DPOTrainer")
+
         return super().train(dataset, batch_size, epochs, shuffle, val_dataset=val_dataset)
 
 
@@ -865,4 +869,8 @@ class KTOTrainer(CSMTrainer):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
+
+        if val_dataset is not None:
+            raise ValueError("val_dataset must be None for KTOTrainer")
+
         return super().train(dataset, batch_size, epochs, shuffle, val_dataset)

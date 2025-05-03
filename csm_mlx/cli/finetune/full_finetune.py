@@ -137,7 +137,8 @@ def sft_finetune(
     ckpt_freq: Annotated[
         int,
         typer.Option(
-            "--ckpt_freq",
+            "--ckpt-freq",
+            "--ckpt_freq",  # inconsistent name; kept for compatibility
             help="Save checkpoints every N steps",
             min=1,
         ),
@@ -179,7 +180,41 @@ def sft_finetune(
             case_sensitive=False,
         ),
     ] = OptimizerChoice.ADAMW,
-):
+    val_data_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--val-data-path",
+            help="Path to JSON dataset file with text/audio pairs",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        )
+    ] = None,
+    val_batch_size: Annotated[
+        Optional[int],
+        typer.Option(
+            "--val-batch-size",
+            help="Batch size for validation",
+            min=1,
+        ),
+    ] = 4,
+    val_freq: Annotated[
+        Optional[int],
+        typer.Option(
+            "--val-freq",
+            help="Calculate validation loss every N steps, 0 to disable",
+            min=0,
+        )
+    ] = 0,
+    val_ckpt: Annotated[
+        bool,
+        typer.Option(
+            "--val-ckpt/--no-val-ckpt",
+            help="Caclulate validation loss on each saved checkpoint.",
+        ),
+    ] = False,
+) -> None:
     """Full SFT finetuning for CSM models."""
     print("Starting finetuning script...")
     print(f"Output directory: {output_dir}")
@@ -236,6 +271,9 @@ def sft_finetune(
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,
+            val_freq=val_freq or 0,
+            val_batch_size=val_batch_size or 0,
+            val_ckpt=val_ckpt,
         )
     )
 
@@ -256,11 +294,36 @@ def sft_finetune(
             f"Warning: Dataset size ({len(dataset)}) is smaller than batch size ({batch_size}). Consider reducing batch size."
         )
 
+    val_dataset = None
+    if val_data_path:
+        print(f"Loading validation dataset from {val_data_path}")
+        val_dataset = CSMDataset.from_json(
+            str(val_data_path),
+            n_audio_codebooks=csm_model.n_audio_codebooks,
+            max_audio_length_ms=max_audio_length_ms,
+            mask_speaker_ids=mask_speaker_ids,
+        )
+        if len(val_dataset):
+            print(f"Loaded {len(val_dataset)} samples")
+        else:
+            print("Error: Validation dataset is empty. Please check the data path and format.")
+            raise typer.Exit(code=1)
+
     print(f"Starting training for {epochs} epochs, batch size {batch_size}")
     print(f"Optimizer: {optimizer.value}, LR: {learning_rate}, WD: {weight_decay}")
     print(f"Saving checkpoints every {ckpt_freq} steps to {output_dir}")
     print(f"Logging metrics every {log_freq} steps")
     print(f"Backbone frozen: {freeze_backbone}, Decoder frozen: {freeze_decoder}")
+    if val_dataset:
+        if val_freq and val_ckpt:
+            print(f"Validating every checkpoint and every {val_freq} steps")
+        elif val_freq:
+            print(f"Validating every {val_freq} steps")
+        elif val_ckpt:
+            print(f"Validating every checkpoint")
+        else:
+            print(f"Error: val_dataset is set but both {val_freq=} and {val_ckpt=}")
+            raise typer.Exit(code=1)
 
     try:
         _ = trainer.train(
