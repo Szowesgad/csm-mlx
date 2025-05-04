@@ -91,6 +91,8 @@ def generate(
     logits_processors: Optional[List[Callable[[mx.array, mx.array], mx.array]]] = None,
     stream: mx.Stream = default_stream,
 ) -> mx.array:
+    model.eval()
+
     max_audio_frames = int(max_audio_length_ms / 80)
 
     tokens, tokens_mask = [], []
@@ -155,6 +157,7 @@ def generate(
     )
 
     # TODO: Implement watermarking!
+    model.train()
 
     return audio
 
@@ -170,6 +173,8 @@ def stream_generate(
     logits_processors: Optional[List[Callable[[mx.array, mx.array], mx.array]]] = None,
     stream: mx.Stream = default_stream,
 ) -> Generator[mx.array, None, None]:
+    model.eval()
+
     max_audio_frames = int(max_audio_length_ms / 80)
 
     tokens, tokens_mask = [], []
@@ -233,4 +238,5 @@ def stream_generate(
                 .squeeze(0)
             )
 
+    model.train()
     audio_tokenizer.reset_state()
