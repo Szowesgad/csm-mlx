@@ -28,6 +28,9 @@ class TrainArgs:
     log_freq: int = 1
     ckpt_freq: int = 1
     only_save_trainable_params: bool = False
+    val_freq: int = 0
+    val_batch_size: int = 4
+    val_ckpt: bool = False
 
 
 @dataclass
@@ -183,6 +186,7 @@ class CSMTrainer:
 
         self.state = TrainerState(learning_rate=float(self.optimizer.learning_rate))
         self.history = History()
+
         self.checkpointer = CheckpointManager(
             self.model,
             self.optimizer,
@@ -317,6 +321,53 @@ class CSMTrainer:
 
         return total_loss
 
+    def evaluate(self, val_dataset) -> float:
+        if not val_dataset:
+            return float('inf')
+
+        self.model.eval()
+        total_val_loss = 0.0
+        total_samples = 0
+        val_batch_size = self.args.val_batch_size
+
+        num_val_samples = len(val_dataset)
+        val_steps = (num_val_samples + val_batch_size - 1) // val_batch_size
+
+        print(f"Running validation for {num_val_samples} samples (Step {self.state.step})")
+        pbar_val = tqdm(range(val_steps), desc="validation")
+
+        for i in pbar_val:
+            start_idx = i * val_batch_size
+            end_idx = min(start_idx + val_batch_size, num_val_samples)
+            batch_idx_list = list(range(start_idx, end_idx))
+
+            if not batch_idx_list:
+                continue
+
+            batch = val_dataset.get_batch(batch_idx_list)
+
+            loss = self.compute_loss(
+                self.model,
+                {
+                    **batch,
+                    "first_codebook_weight_multiplier": mx.array(self.args.first_codebook_weight_multiplier),
+                },
+                per_sample=False,
+            )
+            batch_loss = loss.item()
+            batch_size_actual = len(batch_idx_list)
+            total_val_loss += batch_loss * batch_size_actual
+            total_samples += batch_size_actual
+            pbar_val.set_postfix({"val_loss": f"{batch_loss:.4f}"})
+
+            self.model.train()
+
+            if total_samples == 0:
+                return float('inf')
+            avg_val_loss = total_val_loss / total_samples
+            return float(avg_val_loss)
+
+
     def train_step(self, batch: Dict[str, mx.array]) -> float:
         """Perform a single training step."""
 
@@ -379,7 +430,12 @@ class CSMTrainer:
         return float(loss)
 
     def train(
-        self, dataset: CSMDataset, batch_size: int, epochs: int, shuffle: bool = True
+        self,
+        dataset: CSMDataset,
+        batch_size: int,
+        epochs: int,
+        shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ) -> History:
         """Train the model on the dataset."""
         num_samples = len(dataset)
@@ -466,6 +522,17 @@ class CSMTrainer:
                     and self.state.step % self.args.ckpt_freq == 0
                 ):
                     self.checkpointer.save()
+                    if self.args.val_ckpt and val_dataset is not None:
+                        val_loss = self.evaluate(val_dataset)
+                        print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
+                elif (
+                    self.args.val_freq > 0
+                    and self.state.step % self.args.val_freq == 0
+                    and val_dataset is not None
+                ):
+                    val_loss = self.evaluate(val_dataset)
+                    print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
+
 
             if num_batches_processed_this_epoch > 0:
                 avg_epoch_loss = epoch_loss_sum / num_batches_processed_this_epoch
@@ -476,7 +543,18 @@ class CSMTrainer:
             self.state.epoch = epoch + 1
 
             print(f"Completed Epoch {epoch + 1}. Saving checkpoint.")
+
             self.checkpointer.save()
+            if (
+                self.args.val_ckpt
+                and val_dataset is not None
+                and (
+                    self.args.val_freq == 0 or
+                    self.state.step % self.args.val_freq != 0
+                )
+            ):
+                val_loss = self.evaluate(val_dataset)
+                print(f"Step {self.state.step} Validation Loss: {val_loss: .4f}")
 
         return self.history
 
@@ -595,12 +673,17 @@ class DPOTrainer(CSMTrainer):
         batch_size: int,
         epochs: int,
         shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ):
         if not isinstance(dataset, CSMPairwiseDataset):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
-        return super().train(dataset, batch_size, epochs, shuffle)
+
+        if val_dataset is not None:
+            raise ValueError("val_dataset must be None for DPOTrainer")
+
+        return super().train(dataset, batch_size, epochs, shuffle, val_dataset=val_dataset)
 
 
 class KTOTrainer(CSMTrainer):
@@ -780,9 +863,14 @@ class KTOTrainer(CSMTrainer):
         batch_size: int,
         epochs: int,
         shuffle: bool = True,
+        val_dataset: CSMDataset | None = None
     ):
         if not isinstance(dataset, CSMPointwiseDataset):
             raise TypeError(
                 "Please use `CSMPairwiseDataset` instead of other dataset types."
             )
-        return super().train(dataset, batch_size, epochs, shuffle)
+
+        if val_dataset is not None:
+            raise ValueError("val_dataset must be None for KTOTrainer")
+
+        return super().train(dataset, batch_size, epochs, shuffle, val_dataset)
