@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cli = ["typer>=0.15.2"]
+cli = ["typer>=0.15.2", "click<8.2.0"]
 
 [project.scripts]
 csm-mlx = "csm_mlx.cli.application:app"
