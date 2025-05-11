@@ -189,7 +189,7 @@ def sft_finetune(
             file_okay=True,
             dir_okay=False,
             readable=True,
-        )
+        ),
     ] = None,
     val_batch_size: Annotated[
         Optional[int],
@@ -205,7 +205,7 @@ def sft_finetune(
             "--val-freq",
             help="Calculate validation loss every N steps, 0 to disable",
             min=0,
-        )
+        ),
     ] = 0,
     val_ckpt: Annotated[
         bool,
@@ -306,7 +306,9 @@ def sft_finetune(
         if len(val_dataset):
             print(f"Loaded {len(val_dataset)} samples")
         else:
-            print("Error: Validation dataset is empty. Please check the data path and format.")
+            print(
+                "Error: Validation dataset is empty. Please check the data path and format."
+            )
             raise typer.Exit(code=1)
 
     print(f"Starting training for {epochs} epochs, batch size {batch_size}")
@@ -320,7 +322,7 @@ def sft_finetune(
         elif val_freq:
             print(f"Validating every {val_freq} steps")
         elif val_ckpt:
-            print(f"Validating every checkpoint")
+            print("Validating every checkpoint")
         else:
             print(f"Error: val_dataset is set but both {val_freq=} and {val_ckpt=}")
             raise typer.Exit(code=1)
@@ -459,7 +461,7 @@ def dpo_finetune(
     ckpt_freq: Annotated[
         int,
         typer.Option(
-            "--ckpt_freq",
+            "--ckpt-freq",
             help="Save checkpoints every N steps",
             min=1,
         ),
