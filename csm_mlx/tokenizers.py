@@ -1,3 +1,4 @@
+import logging
 from functools import cache
 from typing import List
 
@@ -5,10 +6,14 @@ import mlx.core as mx
 from huggingface_hub import hf_hub_download
 from moshi_mlx.models.mimi import Mimi, mimi_202407
 from tokenizers.processors import TemplateProcessing
-from transformers import AutoTokenizer, LlamaTokenizer
 
 from csm_mlx.config import TOKENIZERS
 from csm_mlx.segment import Segment
+
+transformers_logger = logging.getLogger("transformers")
+transformers_logger.setLevel(logging.ERROR)
+
+from transformers import AutoTokenizer, LlamaTokenizer  # noqa
 
 
 @cache
