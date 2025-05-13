@@ -14,6 +14,7 @@ csm-mlx finetune full sft [OPTIONS]
 - `--pretrained-path PATH`: Path to local weights
 - `--epochs INT`: Number of training epochs (default: 5)
 - `--batch-size INT`: Batch size for training (default: 4)
+- `--gradient-accumulation-steps INT` Number of gradient accumulation steps (default 1)
 - `--learning-rate, --lr FLOAT`: Learning rate (default: 1e-5)
 - `--weight-decay, --wd FLOAT`: Weight decay for regularization (default: 1e-4)
 - `--freeze-backbone`: Freeze encoder backbone
@@ -60,6 +61,7 @@ csm-mlx finetune lora sft [OPTIONS]
 - `--pretrained-path PATH`: Path to local weights
 - `--epochs INT`: Number of training epochs (default: 10)
 - `--batch-size INT`: Batch size for training (default: 8)
+- `--gradient-accumulation-steps INT` Number of gradient accumulation steps (default 1)
 - `--learning-rate, --lr FLOAT`: Learning rate (default: 5e-4)
 - `--weight-decay, --wd FLOAT`: Weight decay (default: 1e-4)
 - `--lora-rank INT`: Rank of LoRA matrices (default: 8)

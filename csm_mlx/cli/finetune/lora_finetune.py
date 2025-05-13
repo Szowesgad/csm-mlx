@@ -124,6 +124,16 @@ def sft_finetune(
             min=1,
         ),
     ] = 4,
+    grad_accumulation_steps: Annotated[
+        int,
+        typer.Option(
+            "--gradient-accumulation-steps",
+            "--grad-accumulation-steps",
+            "--grad-accum",
+            help="Number of gradient accumulation steps",
+            min=1,
+        ),
+    ] = 1,
     epochs: Annotated[
         int,
         typer.Option(
@@ -329,6 +339,7 @@ def sft_finetune(
             max_norm=max_norm,
             first_codebook_weight_multiplier=first_codebook_weight_multiplier,
             only_save_trainable_params=only_save_trainable_params,
+            grad_accumulation_steps=grad_accumulation_steps,
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,
@@ -510,6 +521,16 @@ def dpo_finetune(
             min=1,
         ),
     ] = 4,
+    grad_accumulation_steps: Annotated[
+        int,
+        typer.Option(
+            "--gradient-accumulation-steps",
+            "--grad-accumulation-steps",
+            "--grad-accum",
+            help="Number of gradient accumulation steps",
+            min=1,
+        ),
+    ] = 1,
     epochs: Annotated[
         int,
         typer.Option(
@@ -688,6 +709,7 @@ def dpo_finetune(
             max_norm=max_norm,
             first_codebook_weight_multiplier=first_codebook_weight_multiplier,
             only_save_trainable_params=only_save_trainable_params,
+            grad_accumulation_steps=grad_accumulation_steps,
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,
@@ -838,6 +860,16 @@ def kto_finetune(
             min=1,
         ),
     ] = 4,
+    grad_accumulation_steps: Annotated[
+        int,
+        typer.Option(
+            "--gradient-accumulation-steps",
+            "--grad-accumulation-steps",
+            "--grad-accum",
+            help="Number of gradient accumulation steps",
+            min=1,
+        ),
+    ] = 1,
     epochs: Annotated[
         int,
         typer.Option(
@@ -1041,6 +1073,7 @@ def kto_finetune(
             max_norm=max_norm,
             first_codebook_weight_multiplier=first_codebook_weight_multiplier,
             only_save_trainable_params=only_save_trainable_params,
+            grad_accumulation_steps=grad_accumulation_steps,
             gradient_checkpointing=gradient_checkpointing,
             ckpt_freq=ckpt_freq,
             log_freq=log_freq,

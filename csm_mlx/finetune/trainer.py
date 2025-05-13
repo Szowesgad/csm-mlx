@@ -9,6 +9,7 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.nn.losses import cross_entropy
+from mlx.nn.utils import tree_map
 from mlx.utils import tree_flatten
 from mlx_lm.tuner.trainer import grad_checkpoint
 from tqdm import tqdm
@@ -24,6 +25,7 @@ class TrainArgs:
     output_dir: Path
     first_codebook_weight_multiplier: float = 1.0
     max_norm: float = 1.0
+    grad_accumulation_steps: int = 1
     gradient_checkpointing: bool = False
     log_freq: int = 1
     ckpt_freq: int = 1
@@ -202,6 +204,7 @@ class CSMTrainer:
 
         # Compile the loss and train functions
         self._step_fn = None
+        self.accumulated_grads = None
 
     @staticmethod
     def compute_loss(
@@ -391,46 +394,43 @@ class CSMTrainer:
         if self._step_fn is None:
             loss_and_grad_fn = nn.value_and_grad(self.model, self.compute_loss)  # type: ignore
 
-            if self.args.max_norm > 0:
+            @partial(mx.compile, inputs=state, outputs=state)
+            def _step(batch: Dict[str, mx.array]):  # type: ignore
+                loss, grads = loss_and_grad_fn(
+                    self.model,
+                    {
+                        **batch,
+                        "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
+                    },
+                )
 
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
-                        },
-                    )
+                return loss, grads
 
-                    grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
+            self._step_fn = _step
 
-                    optimizer.update(model, grads)
+        loss, grads = self._step_fn(batch)
 
-                    return loss, norm
+        norm = 0
+        if self.args.max_norm > 0:
+            grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
 
-                self._step_fn = _step
-            else:
+        if self.accumulated_grads is None:
+            self.accumulated_grads = grads
+        else:
+            self.accumulated_grads = tree_map(mx.add, self.accumulated_grads, grads)
 
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
-                        },
-                    )
+        if self.state.step % self.args.grad_accumulation_steps == 0:
+            avg_grads = tree_map(
+                lambda x: x / self.args.grad_accumulation_steps, self.accumulated_grads
+            )
 
-                    optimizer.update(model, grads)
+            optimizer.update(model, avg_grads)
+            self.accumulated_grads = None
+            mx.eval(loss, norm, state)
+        else:
+            mx.eval(loss)
 
-                    return loss, 0
-
-                self._step_fn = _step
-
-        loss, norm = self._step_fn(batch)
-
-        mx.eval(loss, norm, state)
+        del grads
 
         return float(loss)
 
@@ -627,48 +627,42 @@ class DPOTrainer(CSMTrainer):
         if self._step_fn is None:
             loss_and_grad_fn = nn.value_and_grad(self.model, self.compute_loss)  # type: ignore
 
-            if self.args.max_norm > 0:
+            @partial(mx.compile, inputs=state, outputs=state)
+            def _step(batch: Dict[str, mx.array]):  # type: ignore
+                loss, grads = loss_and_grad_fn(
+                    self.model,
+                    {
+                        **batch,
+                        "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
+                        "beta": beta,
+                    },
+                )
 
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
-                            "beta": beta,
-                        },
-                    )
+                return loss, grads
 
-                    grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
+            self._step_fn = _step
 
-                    optimizer.update(model, grads)
+        loss, grads = self._step_fn(batch)
 
-                    return loss, norm
+        norm = 0
+        if self.args.max_norm > 0:
+            grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
 
-                self._step_fn = _step
-            else:
+        if self.accumulated_grads is None:
+            self.accumulated_grads = grads
+        else:
+            self.accumulated_grads = tree_map(mx.add, self.accumulated_grads, grads)
 
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "first_codebook_weight_multiplier": first_codebook_weight_multiplier,
-                            "beta": beta,
-                        },
-                    )
+        if self.state.step % self.args.grad_accumulation_steps == 0:
+            avg_grads = tree_map(
+                lambda x: x / self.args.grad_accumulation_steps, self.accumulated_grads
+            )
 
-                    optimizer.update(model, grads)
-
-                    return loss, 0
-
-                self._step_fn = _step
-
-        loss, norm = self._step_fn(batch)
-
-        mx.eval(loss, norm, state)
+            optimizer.update(model, avg_grads)
+            self.accumulated_grads = None
+            mx.eval(loss, norm, state)
+        else:
+            mx.eval(loss)
 
         return float(loss)
 
@@ -780,78 +774,38 @@ class KTOTrainer(CSMTrainer):
         if self._step_fn is None:
             loss_and_grad_fn = nn.value_and_grad(self.model, self.compute_loss)  # type: ignore
 
-            if self.args.max_norm > 0:
+            @partial(mx.compile, inputs=state, outputs=state)
+            def _step(batch: Dict[str, mx.array]):  # type: ignore
+                kl_reference = CSMTrainer.compute_loss(
+                    self.reference_model,
+                    batch,
+                    per_sample=True,
+                    cause_mismatch=True,
+                )
+                kl_policy = CSMTrainer.compute_loss(
+                    model, batch, per_sample=True, cause_mismatch=True
+                )
 
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    kl_reference = CSMTrainer.compute_loss(
-                        self.reference_model,
-                        batch,
-                        per_sample=True,
-                        cause_mismatch=True,
-                    )
-                    kl_policy = CSMTrainer.compute_loss(
-                        model, batch, per_sample=True, cause_mismatch=True
-                    )
+                reference = CSMTrainer.compute_loss(
+                    self.reference_model,
+                    batch,
+                    per_sample=True,
+                )
+                loss, grads = loss_and_grad_fn(
+                    self.model,
+                    {
+                        **batch,
+                        "kl_reference": kl_reference,
+                        "kl_policy": kl_policy,
+                        "reference": reference,
+                    },
+                )
 
-                    reference = CSMTrainer.compute_loss(
-                        self.reference_model,
-                        batch,
-                        per_sample=True,
-                    )
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "kl_reference": kl_reference,
-                            "kl_policy": kl_policy,
-                            "reference": reference,
-                        },
-                    )
+                return loss, grads
 
-                    grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
+            self._step_fn = _step
 
-                    optimizer.update(model, grads)
-
-                    return loss, norm
-
-                self._step_fn = _step
-            else:
-
-                @partial(mx.compile, inputs=state, outputs=state)
-                def _step(batch: Dict[str, mx.array]):  # type: ignore
-                    kl_reference = CSMTrainer.compute_loss(
-                        self.reference_model,
-                        batch,
-                        per_sample=True,
-                        cause_mismatch=True,
-                    )
-                    kl_policy = CSMTrainer.compute_loss(
-                        model, batch, per_sample=True, cause_mismatch=True
-                    )
-
-                    reference = CSMTrainer.compute_loss(
-                        self.reference_model,
-                        batch,
-                        per_sample=True,
-                    )
-                    loss, grads = loss_and_grad_fn(
-                        self.model,
-                        {
-                            **batch,
-                            "kl_reference": kl_reference,
-                            "kl_policy": kl_policy,
-                            "reference": reference,
-                        },
-                    )
-
-                    optimizer.update(model, grads)
-
-                    return loss, 0
-
-                self._step_fn = _step
-
-        loss, norm = self._step_fn(
+        loss, grads = self._step_fn(
             {
                 **batch,
                 "beta": beta,
@@ -860,7 +814,25 @@ class KTOTrainer(CSMTrainer):
             }
         )
 
-        mx.eval(loss, norm, state)
+        norm = 0
+        if self.args.max_norm > 0:
+            grads, norm = optim.clip_grad_norm(grads, self.args.max_norm)
+
+        if self.accumulated_grads is None:
+            self.accumulated_grads = grads
+        else:
+            self.accumulated_grads = tree_map(mx.add, self.accumulated_grads, grads)
+
+        if self.state.step % self.args.grad_accumulation_steps == 0:
+            avg_grads = tree_map(
+                lambda x: x / self.args.grad_accumulation_steps, self.accumulated_grads
+            )
+
+            optimizer.update(model, avg_grads)
+            self.accumulated_grads = None
+            mx.eval(loss, norm, state)
+        else:
+            mx.eval(loss)
 
         return float(loss)
 
