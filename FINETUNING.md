@@ -61,6 +61,124 @@ If you trained a LoRA model, you can load it via the `load_adapters` function af
 
 > If you're trying to run one of the checkpoints, rename the checkpoint to `adapters.safetensors` and copy the `adapter_config.json` from the parent folder. Then you should be able to run it!
 
+---
+
+### Some script that might help you navigate
+
+I'm planning to add those on CLI, meantime please use this.
+
+### Generation from fine-tuned weight
+
+To generate from full-finetuned model, you can just
+```py
+from mlx_lm.sample_utils import make_sampler
+from csm_mlx import CSM, csm_1b, generate
+
+import audiofile
+import numpy as np
+
+csm = CSM(csm_1b())
+csm.load_weights("./finetuned_weight.safetensors")
+
+audio = generate(
+    csm,
+    text="Hello from Sesame.",
+    speaker=0,
+    context=[],
+    max_audio_length_ms=10_000,
+    sampler=make_sampler(temp=0.8, top_k=50)
+)
+
+audiofile.write("./audio.wav", np.asarray(audio), 24000)
+```
+
+Just replace the `./finetuned_weight.safetensors` with your fine-tuned weight path, and it should work!
+
+For LoRA tuned model, you can try:
+```py
+from mlx_lm.sample_utils import make_sampler
+from huggingface_hub import hf_hub_download
+from csm_mlx import CSM, csm_1b, generate, load_adapters
+
+import audiofile
+import numpy as np
+
+csm = CSM(csm_1b())
+weight = hf_hub_download(repo_id="senstella/csm-1b-mlx", filename="ckpt.safetensors")
+csm.load_weights(weight)
+
+# Load LoRA here!
+load_adapters(csm, "./run-path")
+
+audio = generate(
+    csm,
+    text="Hello from Sesame.",
+    speaker=0,
+    context=[],
+    max_audio_length_ms=10_000,
+    sampler=make_sampler(temp=0.8, top_k=50)
+)
+
+audiofile.write("./audio.wav", np.asarray(audio), 24000)
+```
+
+Replace the `./run-path` with your training path where it contains `adapters.safetensors` and `adapter_config.json` to ensure it works correctly!
+
+#### Fusing the LoRA
+
+In order to fuse the trained LoRA with original model to release in GitHub:
+
+```py
+from pathlib import Path
+from csm_mlx import CSM, csm_1b, load_adapters
+from huggingface_hub import hf_hub_download
+from mlx.utils import tree_flatten, tree_unflatten
+from mlx_lm.utils import save_weights
+
+csm = CSM(csm_1b())
+weight = hf_hub_download(repo_id="senstella/csm-1b-mlx", filename="ckpt.safetensors")
+csm.load_weights(weight)
+
+load_adapters(csm, './run-path')
+
+fused_linears = [
+    (n, m.fuse()) for n, m in csm.named_modules() if hasattr(m, "fuse")
+]
+csm.update_modules(tree_unflatten(fused_linears))
+
+weights = dict(tree_flatten(csm.parameters()))
+save_path = Path("./fused-weight")
+save_weights(save_path, weights)
+```
+
+#### Converting model back to PyTorch mainline compatable:
+
+If you want to convert the trained model to original PyTorch model compatible, you can try this (Must have `torch` installed):
+
+```py
+import torch
+from safetensors.torch import load_file
+
+tensors = load_file("ckpt.safetensors")
+recovered_tensors = {}
+for name, value in tensors.items():
+    name = (
+        name.replace("up_proj", "w3")
+             .replace("down_proj", "w2")
+             .replace("gate_proj", "w1")
+             .replace("self_attn", "attn")
+             .replace("norm.weight", "norm.scale")
+             .replace("input_layernorm", "sa_norm")
+             .replace("post_attention_layernorm", "mlp_norm")
+             .replace("o_proj", "output_proj")
+    )
+    value = value.to(torch.float32)
+    recovered_tensors[name] = value
+    print(name, value.shape)
+
+torch.save(recovered_tensors, "pytorch-ckpt.pt")
+```
+
 ## Todo
 
 - [ ] Implement computation amortization
